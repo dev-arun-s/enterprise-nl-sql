@@ -1,0 +1,61 @@
+spring:
+  application:
+    name: nl2sql-backend
+
+  datasource:
+    oracle:
+      url: jdbc:oracle:thin:@//localhost:1521/ORCLPDB1
+      username: your_oracle_user
+      password: your_oracle_password
+      driver-class-name: oracle.jdbc.OracleDriver
+    h2:
+      url: jdbc:h2:mem:nl2sqlhistory;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+      username: sa
+      password:
+      driver-class-name: org.h2.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: false
+    database-platform: org.hibernate.dialect.H2Dialect
+
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+
+  ai:
+    openai:
+      base-url: https://your-custom-llm-endpoint.com
+      api-key: your-api-key-here
+      chat:
+        options:
+          model: your-model-name
+          temperature: 0.1
+          max-tokens: 2048
+
+nl2sql:
+  metadata:
+    default-schemas:
+      - HR
+      - SALES
+    storage-path: ./metadata
+    max-result-rows: 500
+    favourites-file: ./metadata/favourites.json
+
+  security:
+    # Set to true to allow INSERT queries to be executed
+    allow-insert: false
+    # Set to true to allow UPDATE queries to be executed
+    allow-update: false
+    # DELETE queries are NEVER allowed regardless of config
+
+server:
+  port: 8080
+
+logging:
+  level:
+    com.nl2sql: DEBUG
+    org.springframework.ai: INFO
+    org.springframework.jdbc: WARN

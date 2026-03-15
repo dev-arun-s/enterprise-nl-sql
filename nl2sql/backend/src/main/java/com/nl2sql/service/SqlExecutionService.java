@@ -2,7 +2,6 @@ package com.nl2sql.service;
 
 import com.nl2sql.config.Nl2SqlProperties;
 import com.nl2sql.dto.SqlExecutionResult;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -22,13 +21,22 @@ import java.util.*;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class SqlExecutionService {
 
-    @Qualifier("oracleJdbcTemplate")
     private final JdbcTemplate oracleJdbcTemplate;
-
     private final Nl2SqlProperties properties;
+
+    /**
+     * Explicit constructor so @Qualifier is honoured.
+     * Lombok's @RequiredArgsConstructor does not propagate field-level @Qualifier
+     * to constructor parameters, causing Spring to inject the @Primary (H2) template.
+     */
+    public SqlExecutionService(
+            @Qualifier("oracleJdbcTemplate") JdbcTemplate oracleJdbcTemplate,
+            Nl2SqlProperties properties) {
+        this.oracleJdbcTemplate = oracleJdbcTemplate;
+        this.properties = properties;
+    }
 
     public SqlExecutionResult execute(String sql) {
         validatePermissions(sql);

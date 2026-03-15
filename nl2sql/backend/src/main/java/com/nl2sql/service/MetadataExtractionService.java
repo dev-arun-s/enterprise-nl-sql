@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.nl2sql.config.Nl2SqlProperties;
 import com.nl2sql.model.*;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -23,15 +22,24 @@ import java.util.*;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class MetadataExtractionService {
 
-    @Qualifier("oracleJdbcTemplate")
     private final JdbcTemplate oracleJdbcTemplate;
-
     private final Nl2SqlProperties properties;
     private final ObjectMapper objectMapper = new ObjectMapper()
             .enable(SerializationFeature.INDENT_OUTPUT);
+
+    /**
+     * Explicit constructor so @Qualifier is honoured.
+     * Lombok's @RequiredArgsConstructor does not propagate field-level @Qualifier
+     * to constructor parameters, causing Spring to inject the @Primary (H2) template.
+     */
+    public MetadataExtractionService(
+            @Qualifier("oracleJdbcTemplate") JdbcTemplate oracleJdbcTemplate,
+            Nl2SqlProperties properties) {
+        this.oracleJdbcTemplate = oracleJdbcTemplate;
+        this.properties = properties;
+    }
 
     // ── Public API ───────────────────────────────────────────────────────────
 

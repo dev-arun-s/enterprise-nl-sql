@@ -3,28 +3,67 @@ spring:
     name: nl2sql-backend
 
   datasource:
+    # ── Oracle (metadata extraction + SQL execution) ──────────────────────────
     oracle:
       url: jdbc:oracle:thin:@//localhost:1521/ORCLPDB1
       username: your_oracle_user
       password: your_oracle_password
       driver-class-name: oracle.jdbc.OracleDriver
+
+      # ── HikariCP connection pool ─────────────────────────────────────────────
+      # Spring Boot auto-configures HikariCP when it's on the classpath (default).
+      hikari:
+        # Pool size: for metadata extraction we run 6 parallel queries,
+        # so we need at least 6 connections. Add headroom for user queries.
+        minimum-idle: 5
+        maximum-pool-size: 15
+
+        # How long (ms) to wait for a connection from the pool before throwing.
+        # Increase if you see "Connection is not available" under load.
+        connection-timeout: 30000        # 30 seconds
+
+        # How long (ms) a connection can sit idle before being closed.
+        idle-timeout: 600000             # 10 minutes
+
+        # How long (ms) a connection can live before being retired (prevents stale connections).
+        max-lifetime: 1800000            # 30 minutes
+
+        # Keepalive query — prevents Oracle from closing idle connections.
+        # Oracle closes connections idle for more than profile's IDLE_TIME.
+        keepalive-time: 60000            # ping every 60 seconds
+        connection-test-query: SELECT 1 FROM DUAL
+
+        # Pool name — visible in JMX / logs
+        pool-name: NL2SQL-Oracle-Pool
+
+        # Cache PreparedStatements at the HikariCP level (in addition to Oracle's
+        # implicit statement cache set in DataSourceConfig).
+        data-source-properties:
+          cachePrepStmts: true
+          prepStmtCacheSize: 50
+          prepStmtCacheSqlLimit: 2048
+
+    # ── H2 (query history, in-memory) ─────────────────────────────────────────
     h2:
       url: jdbc:h2:mem:nl2sqlhistory;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
       username: sa
       password:
       driver-class-name: org.h2.Driver
 
+  # ── JPA (H2 is @Primary for JPA/Hibernate) ──────────────────────────────────
   jpa:
     hibernate:
       ddl-auto: create-drop
     show-sql: false
     database-platform: org.hibernate.dialect.H2Dialect
 
+  # ── H2 Console (dev only) ────────────────────────────────────────────────────
   h2:
     console:
       enabled: true
       path: /h2-console
 
+  # ── Spring AI — OpenAI-compatible endpoint ────────────────────────────────────
   ai:
     openai:
       base-url: https://your-custom-llm-endpoint.com
@@ -35,6 +74,7 @@ spring:
           temperature: 0.1
           max-tokens: 2048
 
+# ── NL2SQL config ─────────────────────────────────────────────────────────────
 nl2sql:
   metadata:
     default-schemas:
@@ -51,11 +91,14 @@ nl2sql:
     allow-update: false
     # DELETE queries are NEVER allowed regardless of config
 
+# ── Server ────────────────────────────────────────────────────────────────────
 server:
   port: 8080
 
+# ── Logging ───────────────────────────────────────────────────────────────────
 logging:
   level:
     com.nl2sql: DEBUG
+    com.zaxxer.hikari: INFO         # Set to DEBUG to see pool events
     org.springframework.ai: INFO
     org.springframework.jdbc: WARN

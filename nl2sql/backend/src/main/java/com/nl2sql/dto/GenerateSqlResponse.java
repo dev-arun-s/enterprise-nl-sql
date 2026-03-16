@@ -14,5 +14,8 @@ public class GenerateSqlResponse {
     private String schemaName;
     private String prompt;
     private String generatedSql;
-    private SqlExecutionResult executionResult;  // null if executeImmediately = false
+
+    // Validation fields — populated when valid=false, generatedSql will be null
+    private boolean promptValid;
+    private String  validationReason;
 }

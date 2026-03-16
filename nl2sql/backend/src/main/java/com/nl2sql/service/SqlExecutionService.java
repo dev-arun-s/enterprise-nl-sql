@@ -154,10 +154,19 @@ public class SqlExecutionService {
 
     private String applyRowLimit(String sql) {
         int max = properties.getMaxResultRows();
-        String upper = sql.toUpperCase();
-        if (upper.contains("ROWNUM") || upper.contains("FETCH FIRST")) {
-            return sql;
+
+        // Strip trailing semicolons and whitespace — Oracle JDBC does not accept
+        // a semicolon inside the SQL string (unlike SQL*Plus), and appending
+        // FETCH FIRST after a semicolon causes ORA-00933 "bad grammar".
+        String trimmed = sql.stripTrailing();
+        while (trimmed.endsWith(";")) {
+            trimmed = trimmed.substring(0, trimmed.length() - 1).stripTrailing();
         }
-        return sql + "\nFETCH FIRST " + max + " ROWS ONLY";
+
+        String upper = trimmed.toUpperCase();
+        if (upper.contains("ROWNUM") || upper.contains("FETCH FIRST")) {
+            return trimmed;  // already has a row limit — just return cleaned SQL
+        }
+        return trimmed + "\nFETCH FIRST " + max + " ROWS ONLY";
     }
 }

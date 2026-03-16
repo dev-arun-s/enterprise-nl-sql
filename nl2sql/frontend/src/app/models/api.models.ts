@@ -19,6 +19,8 @@ export interface GenerateSqlResponse {
   schemaName: string;
   prompt: string;
   generatedSql: string;
+  promptValid: boolean;
+  validationReason: string;
 }
 
 export interface ExecuteSqlRequest {

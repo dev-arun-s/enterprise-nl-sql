@@ -117,12 +117,22 @@ import { SqlExecutionResult } from '../../models/api.models';
   `,
   styles: [`
     /* ── Panel shell ───────────────────────────────────────────── */
+    /* :host fills the app-results-grid host element which is sized by app.component */
+    :host {
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      min-height: 0;
+      overflow: hidden;
+    }
+
     .results-panel {
       flex: 1;
       display: flex;
       flex-direction: column;
       overflow: hidden;       /* Panel itself does NOT scroll */
       min-height: 0;          /* Required for flex children to shrink */
+      height: 100%;
     }
 
     /* ── Toolbar ────────────────────────────────────────────────── */

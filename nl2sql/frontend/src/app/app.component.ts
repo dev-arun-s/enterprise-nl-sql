@@ -87,18 +87,37 @@ import { GenerateSqlResponse, SqlExecutionResult } from './models/api.models';
       background: var(--bg-secondary);
     }
 
-    /* Results grid gets all available height; history + favourites are fixed at bottom */
+    /*
+     * Right panel flex budget:
+     *   app-results-grid  — flex: 1 1 50%   grows/shrinks, guaranteed 50% minimum
+     *   app-history       — flex: 0 1 28%   can shrink, capped at 28%
+     *   app-favourites    — flex: 0 1 22%   can shrink, capped at 22%
+     *
+     * All three can shrink (second value = 1) so the total never exceeds 100%.
+     * results-grid has min-height: 200px so it is never crushed to zero.
+     */
     app-results-grid {
-      flex: 1;
-      min-height: 0;            /* allows shrinking below content size */
+      flex: 1 1 50%;
+      min-height: 200px;
       overflow: hidden;
       display: flex;
       flex-direction: column;
     }
 
-    app-history,
+    app-history {
+      flex: 0 1 28%;
+      min-height: 0;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
     app-favourites {
-      flex-shrink: 0;           /* do not shrink — take their natural max-height */
+      flex: 0 1 22%;
+      min-height: 0;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
     }
   `]
 })

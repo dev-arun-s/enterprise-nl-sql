@@ -42,10 +42,19 @@ import { QueryHistory } from '../../models/api.models';
     </div>
   `,
   styles: [`
+    :host {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      overflow: hidden;
+    }
+
     .history-panel {
-      flex-shrink: 0; max-height: 40%;
       display: flex; flex-direction: column;
-      border-top: 1px solid var(--border); background: var(--bg-primary); overflow: hidden;
+      border-top: 1px solid var(--border); background: var(--bg-primary);
+      overflow: hidden;
+      flex: 1;       /* fills the :host which is sized by app.component */
+      min-height: 0;
     }
     .history-toolbar {
       display: flex; align-items: center; gap: 8px;

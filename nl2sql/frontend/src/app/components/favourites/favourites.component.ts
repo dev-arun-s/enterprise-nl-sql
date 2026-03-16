@@ -35,11 +35,19 @@ import { FavouriteQuery } from '../../models/api.models';
     </div>
   `,
   styles: [`
+    :host {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      overflow: hidden;
+    }
+
     .fav-panel {
-      flex-shrink: 0; max-height: 38%;
       display: flex; flex-direction: column;
       border-top: 1px solid var(--border); background: var(--bg-primary);
       overflow: hidden;
+      flex: 1;       /* fills the :host which is sized by app.component */
+      min-height: 0;
     }
     .fav-toolbar {
       display: flex; align-items: center; gap: 8px;

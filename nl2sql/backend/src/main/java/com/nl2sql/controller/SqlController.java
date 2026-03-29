@@ -25,22 +25,22 @@ public class SqlController {
 
     /**
      * POST /api/sql/generate
-     * Validates the prompt first, then generates SQL if valid.
-     * Returns promptValid=false (with a reason) without calling the LLM
-     * if the prompt is invalid — saving tokens and giving clear user feedback.
+     * Validates prompt → generates SQL with confidence score → returns updated conversation history.
      */
     @PostMapping("/generate")
     public ResponseEntity<GenerateSqlResponse> generate(
             @Valid @RequestBody GenerateSqlRequest request) {
 
-        log.info("Generate SQL | schema={} | prompt={}", request.getSchemaName(), request.getPrompt());
+        log.info("Generate SQL | schema={} | conversationTurns={} | prompt={}",
+                request.getSchemaName(),
+                request.getConversationHistory() == null ? 0 : request.getConversationHistory().size(),
+                request.getPrompt());
 
-        // 1. Validate the prompt
+        // 1. Validate prompt
         PromptValidationService.ValidationResult validation =
                 promptValidationService.validate(request.getPrompt());
 
         if (!validation.valid()) {
-            log.info("Prompt rejected by validation: {}", validation.reason());
             return ResponseEntity.ok(GenerateSqlResponse.builder()
                     .schemaName(request.getSchemaName())
                     .prompt(request.getPrompt())
@@ -49,26 +49,27 @@ public class SqlController {
                     .build());
         }
 
-        // 2. Generate SQL
-        SqlGenerationService.SqlGenerationResult generationResult =
-                sqlGenerationService.generateSql(request.getPrompt(), request.getSchemaName());
+        // 2. Generate SQL (with multi-turn context + confidence)
+        SqlGenerationService.SqlGenerationResult result = sqlGenerationService.generateSql(
+                request.getPrompt(),
+                request.getSchemaName(),
+                request.getConversationHistory()
+        );
 
-        // 3. If the LLM could not find relevant tables, return a clear error
-        if (!generationResult.success()) {
-            log.info("SQL generation failed: {}", generationResult.errorMessage());
+        if (!result.success()) {
             return ResponseEntity.ok(GenerateSqlResponse.builder()
                     .schemaName(request.getSchemaName())
                     .prompt(request.getPrompt())
                     .promptValid(false)
-                    .validationReason(generationResult.errorMessage())
+                    .validationReason(result.errorMessage())
                     .build());
         }
 
-        // 4. Save to history
+        // 3. Save to history
         QueryHistory saved = queryHistoryService.save(QueryHistory.builder()
                 .schemaName(request.getSchemaName().toUpperCase())
                 .naturalLanguagePrompt(request.getPrompt())
-                .generatedSql(generationResult.sql())
+                .generatedSql(result.sql())
                 .executed(false)
                 .build());
 
@@ -76,15 +77,17 @@ public class SqlController {
                 .historyId(saved.getId())
                 .schemaName(request.getSchemaName())
                 .prompt(request.getPrompt())
-                .generatedSql(generationResult.sql())
+                .generatedSql(result.sql())
                 .promptValid(true)
                 .validationReason(validation.reason())
+                .confidenceScore(result.confidenceScore())
+                .confidenceLabel(result.confidenceLabel())
+                .conversationHistory(result.updatedHistory())
                 .build());
     }
 
     /**
      * POST /api/sql/execute
-     * Executes a SQL string — always user-triggered.
      */
     @PostMapping("/execute")
     public ResponseEntity<SqlExecutionResult> execute(

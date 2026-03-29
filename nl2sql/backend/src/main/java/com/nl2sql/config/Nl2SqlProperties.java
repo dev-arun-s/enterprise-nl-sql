@@ -17,25 +17,24 @@ public class Nl2SqlProperties {
     @Data
     public static class Metadata {
         private List<String> defaultSchemas;
-        private String storagePath = "./metadata";
-        private int maxResultRows = 500;
+        private String storagePath    = "./metadata";
+        private int    maxResultRows  = 500;
         private String favouritesFile = "./metadata/favourites.json";
+        private String templatesFile  = "";   // empty = use classpath default
     }
 
     @Data
     public static class Security {
-        /** Allow INSERT statements. Default false. Set true in application.yml to enable. */
         private boolean allowInsert = false;
-        /** Allow UPDATE statements. Default false. Set true in application.yml to enable. */
         private boolean allowUpdate = false;
-        // DELETE is NEVER allowed — no config flag intentionally.
     }
 
-    // Convenience accessors for backward compatibility
-    public String getStoragePath()          { return metadata.getStoragePath(); }
-    public int    getMaxResultRows()        { return metadata.getMaxResultRows(); }
-    public List<String> getDefaultSchemas() { return metadata.getDefaultSchemas(); }
-    public String getFavouritesFile()       { return metadata.getFavouritesFile(); }
-    public boolean isAllowInsert()          { return security.isAllowInsert(); }
-    public boolean isAllowUpdate()          { return security.isAllowUpdate(); }
+    // Convenience accessors
+    public String      getStoragePath()       { return metadata.getStoragePath(); }
+    public int         getMaxResultRows()     { return metadata.getMaxResultRows(); }
+    public List<String> getDefaultSchemas()   { return metadata.getDefaultSchemas(); }
+    public String      getFavouritesFile()    { return metadata.getFavouritesFile(); }
+    public String      getTemplatesFile()     { return metadata.getTemplatesFile(); }
+    public boolean     isAllowInsert()        { return security.isAllowInsert(); }
+    public boolean     isAllowUpdate()        { return security.isAllowUpdate(); }
 }

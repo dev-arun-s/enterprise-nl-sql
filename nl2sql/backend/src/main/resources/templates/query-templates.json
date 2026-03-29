@@ -1,0 +1,98 @@
+[
+  {
+    "id": "top-n-records",
+    "category": "Top N",
+    "title": "Top N records by column",
+    "description": "Retrieve the highest N records ranked by a numeric column",
+    "prompt": "Show the top 10 {table} records ordered by {column} descending",
+    "tags": ["top", "ranking", "order"]
+  },
+  {
+    "id": "count-by-group",
+    "category": "Aggregation",
+    "title": "Count records by group",
+    "description": "Count how many records exist per category or group",
+    "prompt": "Count the number of {table} records grouped by {column}",
+    "tags": ["count", "group", "aggregate"]
+  },
+  {
+    "id": "sum-by-group",
+    "category": "Aggregation",
+    "title": "Sum values by group",
+    "description": "Sum a numeric column grouped by a category",
+    "prompt": "Show the total {numeric_column} for each {group_column} in {table}",
+    "tags": ["sum", "total", "group"]
+  },
+  {
+    "id": "date-range-filter",
+    "category": "Date Range",
+    "title": "Records within date range",
+    "description": "Filter records between two dates",
+    "prompt": "Show all {table} records where {date_column} is between {start_date} and {end_date}",
+    "tags": ["date", "filter", "range"]
+  },
+  {
+    "id": "last-n-days",
+    "category": "Date Range",
+    "title": "Records from last N days",
+    "description": "Retrieve recent records from the past N days",
+    "prompt": "Show all {table} records from the last 30 days based on {date_column}",
+    "tags": ["date", "recent", "days"]
+  },
+  {
+    "id": "month-year-summary",
+    "category": "Date Range",
+    "title": "Monthly summary",
+    "description": "Summarise data by month and year",
+    "prompt": "Show monthly totals of {column} from {table} for the current year grouped by month",
+    "tags": ["monthly", "summary", "date"]
+  },
+  {
+    "id": "records-with-nulls",
+    "category": "Data Quality",
+    "title": "Find records with missing values",
+    "description": "Find records where a column is NULL or empty",
+    "prompt": "Show all {table} records where {column} is null or empty",
+    "tags": ["null", "missing", "quality"]
+  },
+  {
+    "id": "duplicate-detection",
+    "category": "Data Quality",
+    "title": "Find duplicate records",
+    "description": "Detect duplicate values in a column",
+    "prompt": "Find duplicate {column} values in {table} and show how many times each appears",
+    "tags": ["duplicate", "unique", "quality"]
+  },
+  {
+    "id": "join-two-tables",
+    "category": "Joins",
+    "title": "Join two tables",
+    "description": "Combine records from two related tables",
+    "prompt": "Show all {table1} records with their related {table2} information joined on the common key",
+    "tags": ["join", "related", "combine"]
+  },
+  {
+    "id": "records-without-related",
+    "category": "Joins",
+    "title": "Records without related data",
+    "description": "Find records that have no matching entry in a related table",
+    "prompt": "Show all {table1} records that have no matching records in {table2}",
+    "tags": ["left join", "missing", "orphan"]
+  },
+  {
+    "id": "avg-min-max",
+    "category": "Aggregation",
+    "title": "Average, min and max",
+    "description": "Calculate statistical summary for a numeric column",
+    "prompt": "Show the average, minimum and maximum {column} from {table}",
+    "tags": ["average", "min", "max", "statistics"]
+  },
+  {
+    "id": "search-by-keyword",
+    "category": "Search",
+    "title": "Search records by keyword",
+    "description": "Find records where a text column contains a keyword",
+    "prompt": "Find all {table} records where {column} contains the word {keyword}",
+    "tags": ["search", "like", "text", "contains"]
+  }
+]

@@ -1,113 +1,141 @@
 // src/app/components/query-editor/query-editor.component.ts
-import { Component, EventEmitter, OnInit, Output } from '@angular/core';
+import {
+  Component, EventEmitter, OnInit, Output,
+  ViewChild, ElementRef, AfterViewInit, OnDestroy
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../services/api.service';
 import { RefreshService } from '../../services/refresh.service';
-import { GenerateSqlResponse, FavouriteQuery, SecurityConfig } from '../../models/api.models';
+import {
+  GenerateSqlResponse, FavouriteQuery,
+  SecurityConfig, ConversationMessage
+} from '../../models/api.models';
+import { SchemaBrowserComponent } from '../schema-browser/schema-browser.component';
+import { QueryTemplatesComponent } from '../query-templates/query-templates.component';
+
+// CodeMirror 6 imports
+import { EditorState, Extension } from '@codemirror/state';
+import { EditorView, keymap, lineNumbers, highlightActiveLineGutter } from '@codemirror/view';
+import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
+import { sql, StandardSQL } from '@codemirror/lang-sql';
+import { oneDark } from '@codemirror/theme-one-dark';
+import { autocompletion } from '@codemirror/autocomplete';
+import { syntaxHighlighting, defaultHighlightStyle } from '@codemirror/language';
 
 @Component({
   selector: 'app-query-editor',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, SchemaBrowserComponent, QueryTemplatesComponent],
   template: `
     <div class="editor-panel">
 
-      <!-- Schema Selector -->
+      <!-- Schema Selector row -->
       <div class="section">
         <div class="section-label">SCHEMA</div>
         <div class="schema-row">
-          <select class="select" [(ngModel)]="selectedSchema" [disabled]="loading">
+          <select class="select" [(ngModel)]="selectedSchema"
+                  (ngModelChange)="onSchemaChange()" [disabled]="loading">
             <option value="" disabled>Select schema...</option>
             <option *ngFor="let s of schemas" [value]="s">{{ s }}</option>
           </select>
           <button class="icon-btn" (click)="refreshSchemas()" title="Refresh schema list">
             <span [class.spinning]="refreshing">↻</span>
           </button>
+          <button class="icon-btn" (click)="showSchemaBrowser = true"
+                  [disabled]="!selectedSchema" title="Browse schema tables and columns">⬡</button>
           <button class="icon-btn" (click)="showExtractModal = true"
-                  [disabled]="!selectedSchema" title="Extract / refresh metadata from Oracle">⬇</button>
+                  [disabled]="!selectedSchema" title="Extract / refresh metadata">⬇</button>
         </div>
+      </div>
+
+      <!-- Conversation indicator + New Conversation button -->
+      <div class="conversation-bar" *ngIf="conversationHistory.length > 0">
+        <span class="conv-icon">💬</span>
+        <span class="conv-label">{{ conversationTurns }} turn conversation</span>
+        <button class="conv-new-btn" (click)="newConversation()" title="Start a new conversation">
+          ✕ New Conversation
+        </button>
       </div>
 
       <!-- Prompt Input -->
       <div class="section">
-        <div class="section-label">NATURAL LANGUAGE PROMPT</div>
+        <div class="section-label">
+          PROMPT
+          <button class="template-btn" (click)="showTemplates = true" title="Browse query templates">
+            ⚡ Templates
+          </button>
+        </div>
         <textarea class="prompt-textarea"
           [(ngModel)]="prompt"
           (ngModelChange)="onPromptChange()"
-          placeholder="e.g. Show all employees in Sales hired after 2020, with their manager's name..."
-          rows="4"
-          [disabled]="loading"
+          [placeholder]="promptPlaceholder"
+          rows="4" [disabled]="loading"
           [class.invalid]="validationError">
         </textarea>
         <div class="prompt-footer">
           <div class="validation-msg" *ngIf="validationError">
-            <span class="val-icon">⚠</span> {{ validationError }}
+            <span>⚠</span> {{ validationError }}
           </div>
           <div class="char-count" [class.warn]="prompt.length > 1800">{{ prompt.length }}/2000</div>
-        </div>
-      </div>
-
-      <!-- Quick Examples -->
-      <div class="section">
-        <div class="section-label">QUICK EXAMPLES</div>
-        <div class="chips">
-          <button class="chip" *ngFor="let ex of examples" (click)="useExample(ex)">{{ ex }}</button>
         </div>
       </div>
 
       <!-- Generate Button -->
       <div class="section">
         <button class="btn-generate" (click)="generate()" [disabled]="!canGenerate">
-          <span *ngIf="!loading">⚡ Generate SQL</span>
+          <span *ngIf="!loading">
+            {{ conversationHistory.length > 0 ? '🔄 Refine SQL' : '⚡ Generate SQL' }}
+          </span>
           <span *ngIf="loading" class="loading-row">
             <span class="dot-pulse"></span>
-            {{ validating ? 'Validating prompt...' : 'Generating SQL...' }}
+            {{ validating ? 'Validating...' : 'Generating...' }}
           </span>
         </button>
       </div>
 
-      <!-- General Error -->
-      <div class="error-banner" *ngIf="error">
-        <span>⚠</span> {{ error }}
-      </div>
+      <!-- Error -->
+      <div class="error-banner" *ngIf="error">⚠ {{ error }}</div>
 
-      <!-- Generated / Editable SQL Block -->
+      <!-- Generated SQL Block -->
       <div class="section sql-section" *ngIf="editableSql !== null">
+
+        <!-- SQL header -->
         <div class="sql-header-row">
           <div class="section-label">
             {{ isEdited ? 'EDITED SQL' : 'GENERATED SQL' }}
             <span class="edited-badge" *ngIf="isEdited">MODIFIED</span>
           </div>
           <div class="sql-actions">
+            <!-- Confidence badge -->
+            <span class="confidence-badge"
+                  *ngIf="confidenceScore !== null"
+                  [class.conf-high]="confidenceLabel === 'High'"
+                  [class.conf-med]="confidenceLabel === 'Medium'"
+                  [class.conf-low]="confidenceLabel === 'Low'"
+                  [title]="'LLM confidence in this query'">
+              {{ confidenceScore }}% {{ confidenceLabel }}
+            </span>
+            <button class="pill-btn" (click)="formatSql()" [disabled]="formatting">
+              {{ formatting ? '...' : '⌥ Format' }}
+            </button>
             <button class="pill-btn" (click)="copySql()">{{ copied ? '✓' : '⎘' }} Copy</button>
             <button class="pill-btn" (click)="openExplain()" [disabled]="explaining">
               {{ explaining ? '...' : '💡 Explain' }}
             </button>
             <button class="pill-btn star-btn" (click)="openSaveFavourite()">★ Save</button>
-            <button class="pill-btn reset-btn" *ngIf="isEdited" (click)="resetSql()" title="Revert to generated SQL">↺ Reset</button>
+            <button class="pill-btn reset-btn" *ngIf="isEdited" (click)="resetSql()">↺ Reset</button>
           </div>
         </div>
 
-        <!-- Editable SQL textarea -->
-        <div class="sql-edit-wrap">
-          <textarea
-            class="sql-editor"
-            [(ngModel)]="editableSql"
-            (ngModelChange)="onSqlEdit()"
-            rows="8"
-            spellcheck="false"
-            autocomplete="off"
-            autocorrect="off"
-            autocapitalize="off">
-          </textarea>
-        </div>
+        <!-- CodeMirror SQL Editor -->
+        <div class="cm-wrapper" #cmHost></div>
 
         <!-- SQL type + schema tags -->
         <div class="sql-type-row">
           <span class="type-tag" [ngClass]="getSqlTypeClass(editableSql)">{{ getSqlType(editableSql) }}</span>
           <span class="schema-tag">{{ lastResponse?.schemaName }}</span>
-          <span class="edit-hint">✎ You can edit the SQL above before running</span>
+          <span class="edit-hint">✎ Edit SQL above before running</span>
         </div>
 
         <!-- Run Button -->
@@ -119,13 +147,29 @@ import { GenerateSqlResponse, FavouriteQuery, SecurityConfig } from '../../model
         </button>
 
         <div class="run-blocked" *ngIf="editableSql && !canRun(editableSql)">
-          <span>⊘</span> This query type is not permitted by the current configuration.
+          ⊘ This query type is not permitted by the current configuration.
         </div>
       </div>
 
     </div>
 
-    <!-- Extract Metadata Modal -->
+    <!-- Schema Browser Modal -->
+    <app-schema-browser
+      *ngIf="showSchemaBrowser"
+      [schemaName]="selectedSchema"
+      [visible]="showSchemaBrowser"
+      (close)="showSchemaBrowser = false"
+      (insertText)="insertIntoPrompt($event)">
+    </app-schema-browser>
+
+    <!-- Templates Modal -->
+    <app-query-templates
+      *ngIf="showTemplates"
+      (close)="showTemplates = false"
+      (templateSelected)="useTemplate($event)">
+    </app-query-templates>
+
+    <!-- Extract Modal -->
     <div class="modal-overlay" *ngIf="showExtractModal" (click)="showExtractModal = false">
       <div class="modal-box" style="width:460px" (click)="$event.stopPropagation()">
         <div class="modal-header">
@@ -135,7 +179,7 @@ import { GenerateSqlResponse, FavouriteQuery, SecurityConfig } from '../../model
         <div class="modal-body">
           <p class="modal-desc">Extract or refresh metadata for <strong>{{ selectedSchema }}</strong> from Oracle.</p>
           <div class="extract-result success" *ngIf="extractResult">
-            ✓ {{ extractResult.tableCount }} tables extracted at {{ formatTime(extractResult.extractedAt) }}
+            ✓ {{ extractResult.tableCount }} tables extracted
           </div>
           <div class="extract-result error-r" *ngIf="extractError">✗ {{ extractError }}</div>
         </div>
@@ -203,30 +247,51 @@ import { GenerateSqlResponse, FavouriteQuery, SecurityConfig } from '../../model
     }
     .edited-badge {
       font-size: 9px; padding: 1px 6px; border-radius: 3px;
-      background: var(--warning-bg, rgba(210,153,34,0.12));
-      color: var(--warning-text); border: 1px solid var(--warning-text);
+      background: var(--tag-update-bg); color: var(--warning-text);
+      border: 1px solid var(--warning-text);
     }
 
     .schema-row { display: flex; gap: 6px; align-items: center; }
     .select {
       flex: 1; background: var(--input-bg); border: 1px solid var(--border);
       color: var(--text-primary); padding: 8px 12px; border-radius: 6px;
-      font-size: 13px; font-family: 'JetBrains Mono', monospace; outline: none;
-      transition: border-color .2s;
+      font-size: 13px; font-family: 'JetBrains Mono', monospace; outline: none; transition: border-color .2s;
     }
     .select:focus { border-color: var(--accent); }
 
     .icon-btn {
-      width: 32px; height: 32px; background: var(--input-bg);
-      border: 1px solid var(--border); color: var(--text-muted);
-      border-radius: 6px; cursor: pointer; font-size: 16px;
+      width: 32px; height: 32px; background: var(--input-bg); border: 1px solid var(--border);
+      color: var(--text-muted); border-radius: 6px; cursor: pointer; font-size: 16px;
       display: flex; align-items: center; justify-content: center; transition: all .2s;
     }
     .icon-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
     .icon-btn:disabled { opacity: .4; cursor: not-allowed; }
     .spinning { display: inline-block; animation: spin .8s linear infinite; }
 
+    /* Conversation bar */
+    .conversation-bar {
+      display: flex; align-items: center; gap: 8px;
+      background: var(--accent-dim); border: 1px solid var(--accent-dim);
+      border-radius: 6px; padding: 6px 12px;
+    }
+    .conv-icon { font-size: 14px; }
+    .conv-label { font-size: 12px; color: var(--accent); flex: 1; font-family: 'JetBrains Mono', monospace; }
+    .conv-new-btn {
+      font-size: 11px; background: transparent; border: 1px solid var(--accent);
+      color: var(--accent); padding: 3px 10px; border-radius: 4px; cursor: pointer;
+      font-family: 'JetBrains Mono', monospace; transition: all .15s;
+    }
+    .conv-new-btn:hover { background: var(--accent); color: #fff; }
+
     /* Prompt */
+    .template-btn {
+      font-size: 10px; padding: 2px 8px; border-radius: 4px;
+      background: var(--badge-bg); border: 1px solid var(--border);
+      color: var(--accent); cursor: pointer; font-family: 'JetBrains Mono', monospace;
+      transition: all .15s; margin-left: auto;
+    }
+    .template-btn:hover { background: var(--accent-dim); border-color: var(--accent); }
+
     .prompt-textarea {
       background: var(--input-bg); border: 1px solid var(--border);
       color: var(--text-primary); padding: 12px; border-radius: 6px;
@@ -235,27 +300,12 @@ import { GenerateSqlResponse, FavouriteQuery, SecurityConfig } from '../../model
     }
     .prompt-textarea:focus { border-color: var(--accent); }
     .prompt-textarea.invalid { border-color: var(--error-border) !important; }
-
-    .prompt-footer {
-      display: flex; align-items: flex-start; justify-content: space-between; gap: 8px;
-    }
-    .validation-msg {
-      display: flex; align-items: flex-start; gap: 6px;
-      font-size: 12px; color: var(--error-text); flex: 1; line-height: 1.4;
-    }
-    .val-icon { flex-shrink: 0; }
+    .prompt-footer { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+    .validation-msg { display: flex; align-items: flex-start; gap: 6px; font-size: 12px; color: var(--error-text); flex: 1; }
     .char-count { font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
     .char-count.warn { color: var(--warning-text); }
 
-    .chips { display: flex; flex-wrap: wrap; gap: 6px; }
-    .chip {
-      font-size: 11px; padding: 4px 10px; background: var(--badge-bg);
-      border: 1px solid var(--border); color: var(--text-secondary);
-      border-radius: 20px; cursor: pointer; transition: all .2s; font-family: inherit;
-    }
-    .chip:hover { border-color: var(--accent); color: var(--accent); }
-
-    /* Generate button */
+    /* Generate */
     .btn-generate {
       width: 100%; padding: 11px; background: var(--accent); color: #fff;
       border: none; border-radius: 6px; font-size: 13px; font-weight: 700;
@@ -266,62 +316,57 @@ import { GenerateSqlResponse, FavouriteQuery, SecurityConfig } from '../../model
     .btn-generate:disabled { opacity: .5; cursor: not-allowed; transform: none; }
 
     .loading-row { display: flex; align-items: center; gap: 8px; }
-    .dot-pulse {
-      width: 8px; height: 8px; border-radius: 50%;
-      background: currentColor; animation: pulse 1s infinite;
-    }
+    .dot-pulse { width: 8px; height: 8px; border-radius: 50%; background: currentColor; animation: pulse 1s infinite; }
     .dot-white { background: #fff !important; }
+    .error-banner { background: var(--error-bg); border: 1px solid var(--error-border); color: var(--error-text); padding: 10px 14px; border-radius: 6px; font-size: 12px; display: flex; gap: 8px; }
 
-    .error-banner {
-      background: var(--error-bg); border: 1px solid var(--error-border);
-      color: var(--error-text); padding: 10px 14px; border-radius: 6px;
-      font-size: 12px; display: flex; gap: 8px;
-    }
-
-    /* SQL editor section */
+    /* SQL section */
     .sql-section { gap: 10px; }
-    .sql-header-row { display: flex; align-items: center; justify-content: space-between; }
-    .sql-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+    .sql-header-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+    .sql-actions { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
+
+    /* Confidence badge */
+    .confidence-badge {
+      font-size: 11px; font-family: 'JetBrains Mono', monospace; font-weight: 700;
+      padding: 3px 10px; border-radius: 20px; border: 1px solid;
+    }
+    .conf-high { background: var(--success-bg); color: var(--success-text); border-color: var(--success-text); }
+    .conf-med  { background: var(--tag-update-bg); color: var(--warning-text); border-color: var(--warning-text); }
+    .conf-low  { background: var(--error-bg); color: var(--error-text); border-color: var(--error-border); }
 
     .pill-btn {
       font-size: 11px; padding: 3px 10px; background: var(--badge-bg);
       border: 1px solid var(--border); color: var(--text-secondary);
-      border-radius: 20px; cursor: pointer; font-family: 'JetBrains Mono', monospace;
-      transition: all .2s;
+      border-radius: 20px; cursor: pointer; font-family: 'JetBrains Mono', monospace; transition: all .2s;
     }
     .pill-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
     .pill-btn:disabled { opacity: .4; cursor: not-allowed; }
-    .star-btn:hover:not(:disabled) { color: var(--fav-star) !important; border-color: var(--fav-star) !important; }
+    .star-btn:hover:not(:disabled)  { color: var(--fav-star)     !important; border-color: var(--fav-star)     !important; }
     .reset-btn:hover { color: var(--warning-text) !important; border-color: var(--warning-text) !important; }
 
-    /* Editable SQL textarea */
-    .sql-edit-wrap {
+    /* CodeMirror wrapper */
+    .cm-wrapper {
       border: 1px solid var(--border); border-radius: 6px;
-      background: var(--code-bg); overflow: hidden;
+      overflow: hidden; min-height: 120px; max-height: 300px;
       transition: border-color .2s;
     }
-    .sql-edit-wrap:focus-within { border-color: var(--accent); }
-    .sql-editor {
-      width: 100%; background: transparent; border: none; outline: none;
-      color: var(--code-text); font-family: 'JetBrains Mono', monospace;
-      font-size: 12px; line-height: 1.7; padding: 14px;
-      resize: vertical; min-height: 120px;
+    .cm-wrapper:focus-within { border-color: var(--accent); }
+
+    /* Override CodeMirror defaults to match our theme */
+    .cm-wrapper ::ng-deep .cm-editor {
+      height: 100%; max-height: 300px; background: var(--code-bg) !important;
+      font-family: 'JetBrains Mono', monospace; font-size: 12px;
     }
+    .cm-wrapper ::ng-deep .cm-scroller { overflow: auto; }
+    .cm-wrapper ::ng-deep .cm-content { padding: 10px 0; }
 
     .sql-type-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-    .type-tag {
-      font-size: 10px; font-family: 'JetBrains Mono', monospace;
-      padding: 2px 8px; border-radius: 4px; font-weight: 600; text-transform: uppercase;
-    }
+    .type-tag { font-size: 10px; font-family: 'JetBrains Mono', monospace; padding: 2px 8px; border-radius: 4px; font-weight: 600; text-transform: uppercase; }
     .tag-select { background: var(--tag-select-bg); color: var(--tag-select-text); }
     .tag-insert { background: var(--tag-insert-bg); color: var(--tag-insert-text); }
     .tag-update { background: var(--tag-update-bg); color: var(--tag-update-text); }
     .tag-other  { background: var(--badge-bg);      color: var(--text-muted); }
-    .schema-tag {
-      font-size: 10px; font-family: 'JetBrains Mono', monospace;
-      padding: 2px 8px; border-radius: 4px;
-      background: var(--badge-bg); color: var(--accent); border: 1px solid var(--accent-dim);
-    }
+    .schema-tag { font-size: 10px; font-family: 'JetBrains Mono', monospace; padding: 2px 8px; border-radius: 4px; background: var(--badge-bg); color: var(--accent); border: 1px solid var(--accent-dim); }
     .edit-hint { font-size: 11px; color: var(--text-muted); font-style: italic; margin-left: auto; }
 
     .btn-run {
@@ -332,77 +377,64 @@ import { GenerateSqlResponse, FavouriteQuery, SecurityConfig } from '../../model
     }
     .btn-run:hover:not(:disabled) { background: var(--accent-bright); transform: translateY(-1px); }
     .btn-run:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+    .run-blocked { font-size: 12px; color: var(--error-text); display: flex; align-items: center; gap: 6px; padding: 8px 12px; background: var(--error-bg); border: 1px solid var(--error-border); border-radius: 6px; }
 
-    .run-blocked {
-      font-size: 12px; color: var(--error-text);
-      display: flex; align-items: center; gap: 6px;
-      padding: 8px 12px; background: var(--error-bg);
-      border: 1px solid var(--error-border); border-radius: 6px;
-    }
-
-    /* Modal reuse */
-    .btn { padding: 8px 16px; border-radius: 6px; font-size: 13px;
-           font-family: inherit; font-weight: 500; cursor: pointer; transition: all .15s; }
+    /* Modal shared */
+    .btn { padding: 8px 16px; border-radius: 6px; font-size: 13px; font-family: inherit; font-weight: 500; cursor: pointer; transition: all .15s; }
     .btn:disabled { opacity: .45; cursor: not-allowed; }
     .btn-primary { background: var(--accent); color: #fff; border: 1px solid var(--accent); }
     .btn-primary:hover:not(:disabled) { background: var(--accent-bright); }
     .btn-ghost { background: transparent; color: var(--text-secondary); border: 1px solid var(--border); }
     .btn-ghost:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
-
     .modal-desc { font-size: 13px; color: var(--text-secondary); line-height: 1.6; margin-bottom: 12px; }
-    .extract-result { padding: 10px 14px; border-radius: 6px; font-size: 12px;
-                      font-family: 'JetBrains Mono', monospace; margin-top: 8px; }
+    .extract-result { padding: 10px 14px; border-radius: 6px; font-size: 12px; font-family: 'JetBrains Mono', monospace; margin-top: 8px; }
     .extract-result.success { background: var(--success-bg); color: var(--success-text); }
     .extract-result.error-r { background: var(--error-bg); color: var(--error-text); }
-
-    .sql-snippet-box { background: var(--code-bg); border: 1px solid var(--border);
-                       border-radius: 6px; margin-bottom: 16px; }
-    .sql-snippet-box pre { padding: 12px; font-family: 'JetBrains Mono', monospace;
-                           font-size: 11px; color: var(--code-text);
-                           white-space: pre-wrap; word-break: break-all; margin: 0; }
+    .sql-snippet-box { background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px; margin-bottom: 16px; }
+    .sql-snippet-box pre { padding: 12px; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--code-text); white-space: pre-wrap; word-break: break-all; margin: 0; }
     .explanation-text { font-size: 13px; color: var(--text-primary); line-height: 1.8; white-space: pre-wrap; }
     .explanation-loading { display: flex; align-items: center; gap: 10px; color: var(--text-muted); font-size: 13px; }
-    .spinner-sm { width: 16px; height: 16px; border-radius: 50%;
-                  border: 2px solid var(--border); border-top-color: var(--accent);
-                  animation: spin .7s linear infinite; flex-shrink: 0; }
-
-    .field-label { font-size: 12px; color: var(--text-secondary); font-weight: 500;
-                   margin-bottom: 4px; display: block; }
-    .field-input { width: 100%; background: var(--input-bg); border: 1px solid var(--border);
-                   color: var(--text-primary); padding: 9px 12px; border-radius: 6px;
-                   font-size: 13px; font-family: inherit; outline: none; transition: border-color .2s; }
+    .spinner-sm { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--border); border-top-color: var(--accent); animation: spin .7s linear infinite; flex-shrink: 0; }
+    .field-label { font-size: 12px; color: var(--text-secondary); font-weight: 500; margin-bottom: 4px; display: block; }
+    .field-input { width: 100%; background: var(--input-bg); border: 1px solid var(--border); color: var(--text-primary); padding: 9px 12px; border-radius: 6px; font-size: 13px; font-family: inherit; outline: none; transition: border-color .2s; }
     .field-input:focus { border-color: var(--accent); }
     .field-hint { font-size: 11px; color: var(--text-muted); text-align: right; margin-top: 4px; }
   `]
 })
-export class QueryEditorComponent implements OnInit {
+export class QueryEditorComponent implements OnInit, AfterViewInit, OnDestroy {
 
   @Output() queryGenerated = new EventEmitter<GenerateSqlResponse>();
   @Output() sqlExecuted    = new EventEmitter<{ result: any; historyId: number }>();
 
+  @ViewChild('cmHost') cmHost!: ElementRef;
+
+  // CodeMirror editor instance
+  private cmView: EditorView | null = null;
+
   schemas: string[] = [];
   selectedSchema = '';
   prompt = '';
-  loading = false;
-  validating = false;
-  running = false;
-  refreshing = false;
-  extracting = false;
-  explaining = false;
-  savingFav = false;
-  copied = false;
-  error = '';
-  validationError = '';
+  loading = false; validating = false; running = false;
+  refreshing = false; extracting = false; explaining = false;
+  savingFav = false; copied = false; formatting = false;
+  error = ''; validationError = '';
 
   lastResponse: GenerateSqlResponse | null = null;
-  editableSql: string | null = null;   // null = not yet generated
-  originalSql = '';                     // for reset
+  editableSql: string | null = null;
+  originalSql = '';
   isEdited = false;
   explanation = '';
 
-  showExtractModal = false;
-  showExplainModal = false;
-  showFavModal = false;
+  confidenceScore: number | null = null;
+  confidenceLabel: 'High' | 'Medium' | 'Low' | null = null;
+
+  conversationHistory: ConversationMessage[] = [];
+
+  showSchemaBrowser = false;
+  showTemplates     = false;
+  showExtractModal  = false;
+  showExplainModal  = false;
+  showFavModal      = false;
 
   extractResult: any = null;
   extractError = '';
@@ -413,26 +445,30 @@ export class QueryEditorComponent implements OnInit {
     allowUpdate: false, allowDelete: false
   };
 
-  examples = [
-    'List all employees with their department name',
-    'Show top 10 customers by total order value',
-    'Count employees per department',
-    'Find orders placed in the last 30 days',
-    'Show products with stock quantity below 50'
-  ];
-
-  constructor(private api: ApiService, private refreshService: RefreshService) {}
+  constructor(
+    private api: ApiService,
+    private refreshService: RefreshService
+  ) {}
 
   ngOnInit() {
     this.refreshSchemas();
-    this.api.getSecurityConfig().subscribe({
-      next: cfg => this.securityConfig = cfg,
-      error: () => {}
-    });
+    this.api.getSecurityConfig().subscribe({ next: cfg => this.securityConfig = cfg, error: () => {} });
+  }
+
+  ngAfterViewInit() {
+    // CodeMirror is initialised when SQL is first generated (see initCodeMirror)
+  }
+
+  ngOnDestroy() {
+    this.cmView?.destroy();
   }
 
   get canGenerate(): boolean {
     return !!this.prompt.trim() && !!this.selectedSchema && !this.loading;
+  }
+
+  get conversationTurns(): number {
+    return Math.floor(this.conversationHistory.length / 2);
   }
 
   canRun(sql: string): boolean {
@@ -461,42 +497,48 @@ export class QueryEditorComponent implements OnInit {
     return map[this.getSqlType(sql)] ?? 'type-tag tag-other';
   }
 
-  onPromptChange() {
-    // Clear validation error as user types
-    if (this.validationError) this.validationError = '';
+  get promptPlaceholder(): string {
+    return this.conversationHistory.length > 0
+      ? "Refine your query... e.g. 'now add a filter for 2024' or 'also show the department name'"
+      : "e.g. Show all employees in Sales hired after 2020, with their manager's name...";
   }
 
-  onSqlEdit() {
-    this.isEdited = this.editableSql !== this.originalSql;
+  onPromptChange() { if (this.validationError) this.validationError = ''; }
+  onSchemaChange() { this.conversationHistory = []; this.editableSql = null; this.lastResponse = null; }
+
+  useTemplate(promptText: string) { this.prompt = promptText; this.validationError = ''; }
+
+  insertIntoPrompt(text: string) {
+    this.prompt = this.prompt
+      ? this.prompt.trim() + ' ' + text
+      : text;
+    this.showSchemaBrowser = false;
   }
 
-  resetSql() {
-    this.editableSql = this.originalSql;
+  newConversation() {
+    this.conversationHistory = [];
+    this.editableSql = null;
+    this.lastResponse = null;
+    this.originalSql = '';
     this.isEdited = false;
-  }
-
-  useExample(ex: string) {
-    this.prompt = ex;
-    this.validationError = '';
+    this.confidenceScore = null;
+    this.confidenceLabel = null;
+    this.prompt = '';
+    this.cmView?.destroy();
+    this.cmView = null;
   }
 
   refreshSchemas() {
     this.refreshing = true;
     this.api.listSchemas().subscribe({
-      next: s => {
-        this.schemas = s;
-        if (s.length && !this.selectedSchema) this.selectedSchema = s[0];
-        this.refreshing = false;
-      },
+      next: s => { this.schemas = s; if (s.length && !this.selectedSchema) this.selectedSchema = s[0]; this.refreshing = false; },
       error: () => { this.refreshing = false; }
     });
   }
 
   extractMetadata() {
     if (!this.selectedSchema) return;
-    this.extracting = true;
-    this.extractResult = null;
-    this.extractError = '';
+    this.extracting = true; this.extractResult = null; this.extractError = '';
     this.api.extractMetadata(this.selectedSchema).subscribe({
       next: r => { this.extractResult = r; this.extracting = false; this.refreshSchemas(); },
       error: e => { this.extractError = e.error?.message || 'Extraction failed'; this.extracting = false; }
@@ -505,101 +547,109 @@ export class QueryEditorComponent implements OnInit {
 
   generate() {
     if (!this.canGenerate) return;
-    this.loading = true;
-    this.validating = true;
-    this.error = '';
-    this.validationError = '';
-    this.editableSql = null;
-    this.isEdited = false;
+    this.loading = true; this.validating = true;
+    this.error = ''; this.validationError = '';
     this.explanation = '';
 
-    this.api.generateSql({ prompt: this.prompt, schemaName: this.selectedSchema }).subscribe({
+    this.api.generateSql({
+      prompt: this.prompt,
+      schemaName: this.selectedSchema,
+      conversationHistory: this.conversationHistory.length > 0 ? this.conversationHistory : undefined
+    }).subscribe({
       next: r => {
-        this.loading = false;
-        this.validating = false;
+        this.loading = false; this.validating = false;
 
         if (!r.promptValid) {
-          // Either prompt validation failed OR the LLM could not find relevant tables.
-          // Both cases surface via promptValid=false with a reason message.
-          // We distinguish them by checking if the reason mentions table-finding failure
-          // so we can show a slightly different icon/style in the future if needed.
           this.validationError = r.validationReason;
           return;
         }
 
         this.lastResponse = r;
-        this.editableSql = r.generatedSql;
-        this.originalSql = r.generatedSql;
+        this.conversationHistory = r.conversationHistory ?? [];
+        this.confidenceScore = r.confidenceScore ?? null;
+        this.confidenceLabel = r.confidenceLabel ?? null;
+
+        const sql = r.generatedSql;
+        this.originalSql = sql;
         this.isEdited = false;
+
+        if (this.editableSql === null) {
+          this.editableSql = sql;
+          // Defer CodeMirror init until the DOM element exists
+          setTimeout(() => this.initCodeMirror(sql), 50);
+        } else {
+          this.editableSql = sql;
+          this.updateCodeMirror(sql);
+        }
+
         this.queryGenerated.emit(r);
-        // Auto-refresh history panel so new entry appears immediately
         this.refreshService.refreshHistory();
       },
       error: e => {
         this.error = e.error?.message || 'Failed to generate SQL. Please try again.';
-        this.loading = false;
-        this.validating = false;
+        this.loading = false; this.validating = false;
       }
     });
   }
 
   run() {
-    if (!this.editableSql?.trim() || this.running) return;
+    const sql = this.getCmContent();
+    if (!sql?.trim() || this.running) return;
     this.running = true;
     const historyId = this.lastResponse?.historyId;
 
-    this.api.executeSql({ sql: this.editableSql, historyId }).subscribe({
+    this.api.executeSql({ sql, historyId }).subscribe({
       next: result => {
         this.running = false;
         this.sqlExecuted.emit({ result, historyId: historyId! });
-        // Auto-refresh history so executed=true and row count update immediately
         this.refreshService.refreshHistory();
       },
       error: e => {
         this.running = false;
-        const errResult = {
-          executedSql: this.editableSql!, columns: [], rows: [],
-          rowCount: 0, executionTimeMs: 0,
-          errorMessage: e.error?.message || 'Execution failed'
-        };
+        const errResult = { executedSql: sql, columns: [], rows: [], rowCount: 0, executionTimeMs: 0, errorMessage: e.error?.message || 'Execution failed' };
         this.sqlExecuted.emit({ result: errResult, historyId: historyId! });
       }
     });
   }
 
+  formatSql() {
+    const sql = this.getCmContent();
+    if (!sql || this.formatting) return;
+    this.formatting = true;
+    this.api.formatSql(sql).subscribe({
+      next: r => { this.updateCodeMirror(r.formattedSql); this.editableSql = r.formattedSql; this.formatting = false; },
+      error: () => { this.formatting = false; }
+    });
+  }
+
+  resetSql() { this.updateCodeMirror(this.originalSql); this.editableSql = this.originalSql; this.isEdited = false; }
+
   openExplain() {
-    if (!this.editableSql) return;
+    const sql = this.getCmContent();
+    if (!sql) return;
     this.showExplainModal = true;
     if (!this.explanation || this.isEdited) {
-      this.explaining = true;
-      this.explanation = '';
-      this.api.explainSql(this.editableSql).subscribe({
+      this.explaining = true; this.explanation = '';
+      this.api.explainSql(sql).subscribe({
         next: r => { this.explanation = r.explanation; this.explaining = false; },
         error: () => { this.explanation = 'Could not generate explanation.'; this.explaining = false; }
       });
     }
   }
 
-  openSaveFavourite() {
-    this.favTitle = this.prompt.substring(0, 80);
-    this.showFavModal = true;
-  }
+  openSaveFavourite() { this.favTitle = this.prompt.substring(0, 80); this.showFavModal = true; }
 
   saveFavourite() {
-    if (!this.editableSql || !this.favTitle.trim()) return;
+    const sql = this.getCmContent();
+    if (!sql || !this.favTitle.trim()) return;
     this.savingFav = true;
     const fav: FavouriteQuery = {
       schemaName: this.lastResponse?.schemaName ?? this.selectedSchema,
-      title: this.favTitle.trim(),
-      prompt: this.prompt,
-      sql: this.editableSql
+      title: this.favTitle.trim(), prompt: this.prompt, sql
     };
     this.api.addFavourite(fav).subscribe({
       next: () => {
-        this.savingFav = false;
-        this.showFavModal = false;
-        this.favTitle = '';
-        // Auto-refresh favourites panel so new entry appears immediately
+        this.savingFav = false; this.showFavModal = false; this.favTitle = '';
         this.refreshService.refreshFavourites();
       },
       error: () => { this.savingFav = false; }
@@ -607,12 +657,63 @@ export class QueryEditorComponent implements OnInit {
   }
 
   copySql() {
-    if (!this.editableSql) return;
-    navigator.clipboard.writeText(this.editableSql).then(() => {
-      this.copied = true;
-      setTimeout(() => this.copied = false, 2000);
+    const sql = this.getCmContent();
+    if (!sql) return;
+    navigator.clipboard.writeText(sql).then(() => { this.copied = true; setTimeout(() => this.copied = false, 2000); });
+  }
+
+  // ── CodeMirror ────────────────────────────────────────────────────────────
+
+  private initCodeMirror(initialSql: string) {
+    if (!this.cmHost?.nativeElement) return;
+    this.cmView?.destroy();
+
+    const updateListener = EditorView.updateListener.of(update => {
+      if (update.docChanged) {
+        const current = update.state.doc.toString();
+        this.editableSql = current;
+        this.isEdited = current !== this.originalSql;
+      }
+    });
+
+    const theme = EditorView.theme({
+      '&': { backgroundColor: 'var(--code-bg)', color: 'var(--text-primary)', height: '100%' },
+      '.cm-content': { caretColor: 'var(--accent)', fontFamily: '"JetBrains Mono", monospace', fontSize: '12px', lineHeight: '1.7' },
+      '.cm-gutters': { backgroundColor: 'var(--code-bg)', borderRight: '1px solid var(--border)', color: 'var(--text-muted)' },
+      '.cm-activeLine': { backgroundColor: 'rgba(88,166,255,0.05)' },
+      '.cm-selectionBackground, ::selection': { backgroundColor: 'rgba(88,166,255,0.2) !important' },
+    });
+
+    const state = EditorState.create({
+      doc: initialSql,
+      extensions: [
+        lineNumbers(),
+        highlightActiveLineGutter(),
+        history(),
+        sql({ dialect: StandardSQL }),
+        syntaxHighlighting(defaultHighlightStyle),
+        autocompletion(),
+        keymap.of([...defaultKeymap, ...historyKeymap]),
+        updateListener,
+        theme,
+        EditorView.lineWrapping,
+      ]
+    });
+
+    this.cmView = new EditorView({ state, parent: this.cmHost.nativeElement });
+  }
+
+  private updateCodeMirror(newSql: string) {
+    if (!this.cmView) {
+      this.initCodeMirror(newSql);
+      return;
+    }
+    this.cmView.dispatch({
+      changes: { from: 0, to: this.cmView.state.doc.length, insert: newSql }
     });
   }
 
-  formatTime(dt: string): string { return new Date(dt).toLocaleString(); }
+  private getCmContent(): string {
+    return this.cmView?.state.doc.toString() ?? this.editableSql ?? '';
+  }
 }

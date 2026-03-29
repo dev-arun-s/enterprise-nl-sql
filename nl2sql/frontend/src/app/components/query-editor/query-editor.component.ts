@@ -3,6 +3,7 @@ import { Component, EventEmitter, OnInit, Output } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../services/api.service';
+import { RefreshService } from '../../services/refresh.service';
 import { GenerateSqlResponse, FavouriteQuery, SecurityConfig } from '../../models/api.models';
 
 @Component({
@@ -112,7 +113,7 @@ import { GenerateSqlResponse, FavouriteQuery, SecurityConfig } from '../../model
         <!-- Run Button -->
         <button class="btn-run"
           (click)="run()"
-          [disabled]="running || !editableSql?.trim() || !canRun(editableSql)">
+          [disabled]="running || !editableSql.trim() || !canRun(editableSql)">
           <span *ngIf="!running">▶ Run Query</span>
           <span *ngIf="running" class="loading-row"><span class="dot-pulse dot-white"></span>Running...</span>
         </button>
@@ -420,7 +421,7 @@ export class QueryEditorComponent implements OnInit {
     'Show products with stock quantity below 50'
   ];
 
-  constructor(private api: ApiService) {}
+  constructor(private api: ApiService, private refreshService: RefreshService) {}
 
   ngOnInit() {
     this.refreshSchemas();
@@ -531,6 +532,8 @@ export class QueryEditorComponent implements OnInit {
         this.originalSql = r.generatedSql;
         this.isEdited = false;
         this.queryGenerated.emit(r);
+        // Auto-refresh history panel so new entry appears immediately
+        this.refreshService.refreshHistory();
       },
       error: e => {
         this.error = e.error?.message || 'Failed to generate SQL. Please try again.';
@@ -549,6 +552,8 @@ export class QueryEditorComponent implements OnInit {
       next: result => {
         this.running = false;
         this.sqlExecuted.emit({ result, historyId: historyId! });
+        // Auto-refresh history so executed=true and row count update immediately
+        this.refreshService.refreshHistory();
       },
       error: e => {
         this.running = false;
@@ -590,7 +595,13 @@ export class QueryEditorComponent implements OnInit {
       sql: this.editableSql
     };
     this.api.addFavourite(fav).subscribe({
-      next: () => { this.savingFav = false; this.showFavModal = false; this.favTitle = ''; },
+      next: () => {
+        this.savingFav = false;
+        this.showFavModal = false;
+        this.favTitle = '';
+        // Auto-refresh favourites panel so new entry appears immediately
+        this.refreshService.refreshFavourites();
+      },
       error: () => { this.savingFav = false; }
     });
   }

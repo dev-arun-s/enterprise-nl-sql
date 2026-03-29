@@ -1,7 +1,9 @@
 // src/app/components/favourites/favourites.component.ts
-import { Component, EventEmitter, OnInit, Output } from '@angular/core';
+import { Component, EventEmitter, OnDestroy, OnInit, Output } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { Subscription } from 'rxjs';
 import { ApiService } from '../../services/api.service';
+import { RefreshService } from '../../services/refresh.service';
 import { FavouriteQuery } from '../../models/api.models';
 
 @Component({
@@ -105,14 +107,24 @@ import { FavouriteQuery } from '../../models/api.models';
     }
   `]
 })
-export class FavouritesComponent implements OnInit {
+export class FavouritesComponent implements OnInit, OnDestroy {
   @Output() querySelected = new EventEmitter<{ sql: string; prompt: string; schemaName: string }>();
 
   items: FavouriteQuery[] = [];
 
-  constructor(private api: ApiService) {}
+  private sub = new Subscription();
 
-  ngOnInit() { this.load(); }
+  constructor(private api: ApiService, private refreshService: RefreshService) {}
+
+  ngOnInit() {
+    this.load();
+    // Auto-reload whenever a favourite is saved
+    this.sub.add(
+      this.refreshService.favourites$.subscribe(() => this.load())
+    );
+  }
+
+  ngOnDestroy() { this.sub.unsubscribe(); }
 
   load() {
     this.api.getFavourites().subscribe({ next: r => this.items = r, error: () => {} });

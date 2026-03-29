@@ -1,7 +1,9 @@
 // src/app/components/history/history.component.ts
-import { Component, EventEmitter, OnInit, Output } from '@angular/core';
+import { Component, EventEmitter, OnDestroy, OnInit, Output } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { Subscription } from 'rxjs';
 import { ApiService } from '../../services/api.service';
+import { RefreshService } from '../../services/refresh.service';
 import { QueryHistory } from '../../models/api.models';
 
 @Component({
@@ -122,7 +124,7 @@ import { QueryHistory } from '../../models/api.models';
     .pg-info { font-size: 11px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; }
   `]
 })
-export class HistoryComponent implements OnInit {
+export class HistoryComponent implements OnInit, OnDestroy {
   @Output() querySelected = new EventEmitter<{ sql: string; historyId: number }>();
 
   items: QueryHistory[] = [];
@@ -130,8 +132,22 @@ export class HistoryComponent implements OnInit {
   page = 0; pageSize = 10;
   totalPages = 1; totalElements = 0;
 
-  constructor(private api: ApiService) {}
-  ngOnInit() { this.load(); }
+  private sub = new Subscription();
+
+  constructor(private api: ApiService, private refreshService: RefreshService) {}
+
+  ngOnInit() {
+    this.load();
+    // Auto-reload whenever a query is generated or executed
+    this.sub.add(
+      this.refreshService.history$.subscribe(() => {
+        this.page = 0;   // always jump back to first page so new entry is visible
+        this.load();
+      })
+    );
+  }
+
+  ngOnDestroy() { this.sub.unsubscribe(); }
 
   load() {
     this.loading = true;
